@@ -1,97 +1,52 @@
 from fastapi import FastAPI, Query
-from playwright.async_api import async_playwright
+import httpx
 import re
-import asyncio
+import json
 
 app = FastAPI(title="Martinhal Availability API", version="1.0.0")
 
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+}
+
 
 async def scrape_martinhal(checkin: str, checkout: str, adults: int, rooms: int = 1) -> list:
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage", "--blink-settings=imagesEnabled=false"]
-        )
-        page = await browser.new_page()
-        await page.route("**/*.{png,jpg,jpeg,gif,webp,svg,woff,woff2,ttf}", lambda route: route.abort())
+    url = (
+        f"https://booking.martinhal.com/"
+        f"?checkin={checkin}&checkout={checkout}"
+        f"&adult_room1={adults}&skd-total-rooms={rooms}"
+    )
 
-        url = (
-            f"https://booking.martinhal.com/"
-            f"?checkin={checkin}&checkout={checkout}"
-            f"&adult_room1={adults}&skd-total-rooms={rooms}"
-        )
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        response = await client.get(url, headers=HEADERS)
+        html = response.text
 
-        await page.goto(url, wait_until="load", timeout=30000)
-        try:
-            await page.wait_for_selector(".skd-hotel", timeout=8000)
-        except Exception:
-            await page.wait_for_timeout(3000)
+    # Extract JSON data embedded in the page
+    # Pattern: "name":"Property Name" followed later by "price":XXXX
+    names = re.findall(r'"name":"(Martinhal[^"]+)"', html)
+    prices = re.findall(r'"price":(\d+(?:\.\d+)?)', html)
 
-        # Extrair propriedades via seletores
-        results = []
-        property_blocks = await page.query_selector_all(".skd-hotel")
-
-        if not property_blocks:
-            # Fallback: parse texto bruto
-            content = await page.inner_text("body")
-            results = parse_text_fallback(content, checkin, checkout, adults, rooms)
-        else:
-            for block in property_blocks:
-                try:
-                    name = await block.query_selector(".skd-hotel-name")
-                    name_text = await name.inner_text() if name else "N/A"
-
-                    price = await block.query_selector(".skd-price")
-                    price_text = await price.inner_text() if price else "N/A"
-
-                    results.append({
-                        "property": name_text.strip(),
-                        "starting_from": price_text.strip(),
-                        "nights": calculate_nights(checkin, checkout),
-                        "adults": adults,
-                        "rooms": rooms,
-                    })
-                except Exception:
-                    continue
-
-        if not results:
-            content = await page.inner_text("body")
-            results = parse_text_fallback(content, checkin, checkout, adults, rooms)
-
-        await browser.close()
-        return results
-
-
-def parse_text_fallback(content: str, checkin, checkout, adults, rooms) -> list:
-    properties = [
-        "Martinhal Lisbon Oriente",
-        "Martinhal Lisbon Chiado",
-        "Martinhal Quinta Family Resort",
-        "Martinhal Sagres Beach Family Resort Hotel",
-    ]
     nights = calculate_nights(checkin, checkout)
     results = []
 
-    for prop in properties:
-        if prop in content:
-            idx = content.index(prop)
-            snippet = content[idx:idx+900]
-            prices = re.findall(r"€\s*([\d,\.]+)", snippet)
-            price = f"€ {prices[0]}" if prices else "N/A"
-            results.append({
-                "property": prop,
-                "starting_from": price,
-                "nights": nights,
-                "adults": adults,
-                "rooms": rooms,
-            })
+    # Pair names with prices (they appear in the same order)
+    for i, name in enumerate(names):
+        price = f"€ {float(prices[i]):,.2f}" if i < len(prices) else "N/A"
+        results.append({
+            "property": name.strip(),
+            "starting_from": price,
+            "nights": nights,
+            "adults": adults,
+            "rooms": rooms,
+        })
 
     return results
 
 
 def calculate_nights(checkin: str, checkout: str) -> int:
     from datetime import date
-    fmt = "%Y-%m-%d"
     return (date.fromisoformat(checkout) - date.fromisoformat(checkin)).days
 
 
