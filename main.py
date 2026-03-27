@@ -23,20 +23,16 @@ async def scrape_martinhal(checkin: str, checkout: str, adults: int, rooms: int 
         response = await client.get(url, headers=HEADERS)
         html = response.text
 
-    # Extract JSON data embedded in the page
-    # Pattern: "name":"Property Name" followed later by "price":XXXX
-    names = re.findall(r'"name":"(Martinhal[^"]+)"', html)
-    prices = re.findall(r'"price":(\d+(?:\.\d+)?)', html)
+    # Extract property+price pairs: name appears just before its price in the HTML
+    pairs = re.findall(r'"name":"(Martinhal[^"]+)"[^}]{0,200}?"price":(\d+(?:\.\d+)?)', html)
 
     nights = calculate_nights(checkin, checkout)
     results = []
 
-    # Pair names with prices (they appear in the same order)
-    for i, name in enumerate(names):
-        price = f"€ {float(prices[i]):,.2f}" if i < len(prices) else "N/A"
+    for name, price in pairs:
         results.append({
             "property": name.strip(),
-            "starting_from": price,
+            "starting_from": f"€ {float(price):,.2f}",
             "nights": nights,
             "adults": adults,
             "rooms": rooms,
