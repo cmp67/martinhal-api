@@ -31,25 +31,40 @@ async def scrape_martinhal(checkin: str, checkout: str, adults: int, rooms: int 
     match = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
     if match:
         data = json.loads(match.group(1))
-        text = json.dumps(data)
-        # Find hotels array in the pages structure
-        pages_match = re.search(r'"pages":\{"1":\[(.*?)\]\}', text, re.DOTALL)
-        if pages_match:
-            hotels_json = "[" + pages_match.group(1) + "]"
-            hotels = json.loads(hotels_json)
-            for hotel in hotels:
-                name = hotel.get("name", "")
-                price = hotel.get("price")
-                if name and price is not None:
-                    results.append({
-                        "property": name.strip(),
-                        "starting_from": f"€ {float(price):,.2f}",
-                        "nights": nights,
-                        "adults": adults,
-                        "rooms": rooms,
-                    })
+        # Navigate: props -> pageProps -> ... find pages key recursively
+        hotels = _find_hotels(data)
+        for hotel in hotels:
+            name = hotel.get("name", "")
+            price = hotel.get("price")
+            if name and price is not None:
+                results.append({
+                    "property": name.strip(),
+                    "starting_from": f"€ {float(price):,.2f}",
+                    "nights": nights,
+                    "adults": adults,
+                    "rooms": rooms,
+                })
 
     return results
+
+
+def _find_hotels(obj) -> list:
+    """Recursively find the hotels list inside __NEXT_DATA__."""
+    if isinstance(obj, dict):
+        if "pages" in obj and isinstance(obj["pages"], dict):
+            page1 = obj["pages"].get("1", [])
+            if isinstance(page1, list) and page1 and isinstance(page1[0], dict) and "name" in page1[0]:
+                return page1
+        for v in obj.values():
+            result = _find_hotels(v)
+            if result:
+                return result
+    elif isinstance(obj, list):
+        for item in obj:
+            result = _find_hotels(item)
+            if result:
+                return result
+    return []
 
 
 def calculate_nights(checkin: str, checkout: str) -> int:
