@@ -8,8 +8,12 @@ app = FastAPI(title="Martinhal Availability API", version="1.0.0")
 
 async def scrape_martinhal(checkin: str, checkout: str, adults: int, rooms: int = 1) -> list:
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--blink-settings=imagesEnabled=false"]
+        )
         page = await browser.new_page()
+        await page.route("**/*.{png,jpg,jpeg,gif,webp,svg,woff,woff2,ttf}", lambda route: route.abort())
 
         url = (
             f"https://booking.martinhal.com/"
@@ -17,8 +21,11 @@ async def scrape_martinhal(checkin: str, checkout: str, adults: int, rooms: int 
             f"&adult_room1={adults}&skd-total-rooms={rooms}"
         )
 
-        await page.goto(url, wait_until="networkidle", timeout=40000)
-        await page.wait_for_timeout(5000)
+        await page.goto(url, wait_until="load", timeout=30000)
+        try:
+            await page.wait_for_selector(".skd-hotel", timeout=8000)
+        except Exception:
+            await page.wait_for_timeout(3000)
 
         # Extrair propriedades via seletores
         results = []
