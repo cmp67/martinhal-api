@@ -40,14 +40,22 @@ async def scrape_martinhal(checkin: str, checkout: str, adults: int, rooms: int 
             if name and price is not None:
                 marketing = hotel.get("marketing", {})
                 meal_plan = marketing.get("mealPlan", "No meal plan")
+                code = hotel.get("code", "")
+                booking_url = (
+                    f"https://booking.martinhal.com/property/{code}"
+                    f"?checkin={checkin}&checkout={checkout}"
+                    f"&adult_room1={adults}&skd-total-rooms={rooms}"
+                    if code else ""
+                )
                 results.append({
                     "property": name.strip(),
-                    "price_adults_only": f"€ {float(price):,.2f}",
-                    "price_note": f"Preço apenas para {adults} adulto(s). Crianças têm custo adicional — confirmar no motor de reservas.",
+                    "price_adults_only": f"\u20ac {float(price):,.2f}",
+                    "price_note": f"Pre\u00e7o apenas para {adults} adulto(s). Crian\u00e7as t\u00eam custo adicional \u2014 confirmar no motor de reservas.",
                     "meal_plan": meal_plan,
                     "nights": nights,
                     "adults": adults,
                     "rooms": rooms,
+                    "booking_url": booking_url,
                 })
 
     return results
@@ -85,8 +93,8 @@ async def get_availability(
     rooms: int = Query(1, description="Number of rooms"),
 ):
     """
-    Consulta disponibilidade e preços no motor de reservas Martinhal.
-    Retorna lista de propriedades com preço inicial para o período solicitado.
+    Consulta disponibilidade e precos no motor de reservas Martinhal.
+    Retorna lista de propriedades com preco inicial para o periodo solicitado.
     """
     try:
         results = await scrape_martinhal(checkin, checkout, adults, rooms)
