@@ -38,9 +38,13 @@ async def scrape_martinhal(checkin: str, checkout: str, adults: int, rooms: int 
             name = hotel.get("name", "")
             price = hotel.get("price")
             if name and price is not None:
+                marketing = hotel.get("marketing", {})
+                meal_plan = marketing.get("mealPlan", "No meal plan")
                 results.append({
                     "property": name.strip(),
-                    "starting_from": f"€ {float(price):,.2f}",
+                    "price_adults_only": f"€ {float(price):,.2f}",
+                    "price_note": f"Preço apenas para {adults} adulto(s). Crianças têm custo adicional — confirmar no motor de reservas.",
+                    "meal_plan": meal_plan,
                     "nights": nights,
                     "adults": adults,
                     "rooms": rooms,
