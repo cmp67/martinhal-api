@@ -3,7 +3,7 @@ from pydantic import BaseModel
 import httpx
 import re
 import json
-from typing import Optional
+from typing import Optional, List
 
 app = FastAPI(title="Martinhal Availability API", version="1.0.0")
 
@@ -14,7 +14,15 @@ HEADERS = {
 }
 
 
-async def scrape_martinhal(checkin: str, checkout: str, adults: int, rooms: int = 1) -> list:
+def build_children_params(children_ages: list) -> str:
+    """Build Seekda child URL params: child_room1_1=5&child_room1_2=6"""
+    return "".join(f"&child_room1_{i+1}={age}" for i, age in enumerate(children_ages))
+
+
+async def scrape_martinhal(checkin: str, checkout: str, adults: int, rooms: int = 1, children_ages: list = None) -> list:
+    if children_ages is None:
+        children_ages = []
+
     url = (
         f"https://booking.martinhal.com/"
         f"?checkin={checkin}&checkout={checkout}"
@@ -26,13 +34,13 @@ async def scrape_martinhal(checkin: str, checkout: str, adults: int, rooms: int 
         html = response.text
 
     nights = calculate_nights(checkin, checkout)
+    children_suffix = build_children_params(children_ages)
     results = []
 
     # Parse from Next.js __NEXT_DATA__ JSON blob
     match = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
     if match:
         data = json.loads(match.group(1))
-        # Navigate: props -> pageProps -> ... find pages key recursively
         hotels = _find_hotels(data)
         for hotel in hotels:
             name = hotel.get("name", "")
@@ -44,16 +52,17 @@ async def scrape_martinhal(checkin: str, checkout: str, adults: int, rooms: int 
                 booking_url = (
                     f"https://booking.martinhal.com/property/{code}"
                     f"?checkin={checkin}&checkout={checkout}"
-                    f"&adult_room1={adults}&skd-total-rooms={rooms}"
+                    f"&adult_room1={adults}{children_suffix}&skd-total-rooms={rooms}"
                     if code else ""
                 )
                 results.append({
                     "property": name.strip(),
                     "price_adults_only": f"\u20ac {float(price):,.2f}",
-                    "price_note": f"Pre\u00e7o apenas para {adults} adulto(s). Crian\u00e7as t\u00eam custo adicional \u2014 confirmar no motor de reservas.",
+                    "price_note": f"Pre\u00e7o de partida para {adults} adulto(s).",
                     "meal_plan": meal_plan,
                     "nights": nights,
                     "adults": adults,
+                    "children": children_ages,
                     "rooms": rooms,
                     "booking_url": booking_url,
                 })
@@ -91,19 +100,18 @@ async def get_availability(
     checkout: str = Query(..., description="Check-out date (YYYY-MM-DD)"),
     adults: int = Query(2, description="Number of adults"),
     rooms: int = Query(1, description="Number of rooms"),
+    children: str = Query("", description="Children ages comma-separated, e.g. 5,6"),
 ):
-    """
-    Consulta disponibilidade e precos no motor de reservas Martinhal.
-    Retorna lista de propriedades com preco inicial para o periodo solicitado.
-    """
     try:
-        results = await scrape_martinhal(checkin, checkout, adults, rooms)
+        children_ages = [int(a.strip()) for a in children.split(",") if a.strip()] if children else []
+        results = await scrape_martinhal(checkin, checkout, adults, rooms, children_ages)
         nights = calculate_nights(checkin, checkout)
         return {
             "checkin": checkin,
             "checkout": checkout,
             "nights": nights,
             "adults": adults,
+            "children": children_ages,
             "rooms": rooms,
             "properties": results,
         }
@@ -116,18 +124,21 @@ class AvailabilityRequest(BaseModel):
     checkout: str
     adults: int = 2
     rooms: int = 1
+    children: str = ""  # comma-separated ages, e.g. "5,6"
 
 
 @app.post("/availability")
 async def post_availability(body: AvailabilityRequest):
     try:
-        results = await scrape_martinhal(body.checkin, body.checkout, body.adults, body.rooms)
+        children_ages = [int(a.strip()) for a in body.children.split(",") if a.strip()] if body.children else []
+        results = await scrape_martinhal(body.checkin, body.checkout, body.adults, body.rooms, children_ages)
         nights = calculate_nights(body.checkin, body.checkout)
         return {
             "checkin": body.checkin,
             "checkout": body.checkout,
             "nights": nights,
             "adults": body.adults,
+            "children": children_ages,
             "rooms": body.rooms,
             "properties": results,
         }
