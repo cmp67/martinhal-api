@@ -2,6 +2,7 @@ from fastapi import FastAPI, Query
 import httpx
 import re
 import json
+from typing import Optional
 
 app = FastAPI(title="Martinhal Availability API", version="1.0.0")
 
@@ -23,20 +24,30 @@ async def scrape_martinhal(checkin: str, checkout: str, adults: int, rooms: int 
         response = await client.get(url, headers=HEADERS)
         html = response.text
 
-    # Extract property+price pairs: name appears just before its price in the HTML
-    pairs = re.findall(r'"name":"(Martinhal[^"]+)"[^}]{0,200}?"price":(\d+(?:\.\d+)?)', html)
-
     nights = calculate_nights(checkin, checkout)
     results = []
 
-    for name, price in pairs:
-        results.append({
-            "property": name.strip(),
-            "starting_from": f"€ {float(price):,.2f}",
-            "nights": nights,
-            "adults": adults,
-            "rooms": rooms,
-        })
+    # Parse from Next.js __NEXT_DATA__ JSON blob
+    match = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
+    if match:
+        data = json.loads(match.group(1))
+        text = json.dumps(data)
+        # Find hotels array in the pages structure
+        pages_match = re.search(r'"pages":\{"1":\[(.*?)\]\}', text, re.DOTALL)
+        if pages_match:
+            hotels_json = "[" + pages_match.group(1) + "]"
+            hotels = json.loads(hotels_json)
+            for hotel in hotels:
+                name = hotel.get("name", "")
+                price = hotel.get("price")
+                if name and price is not None:
+                    results.append({
+                        "property": name.strip(),
+                        "starting_from": f"€ {float(price):,.2f}",
+                        "nights": nights,
+                        "adults": adults,
+                        "rooms": rooms,
+                    })
 
     return results
 
