@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Query
+from pydantic import BaseModel
 import httpx
 import re
 import json
@@ -92,6 +93,30 @@ async def get_availability(
             "nights": nights,
             "adults": adults,
             "rooms": rooms,
+            "properties": results,
+        }
+    except Exception as e:
+        return {"error": str(e), "properties": []}
+
+
+class AvailabilityRequest(BaseModel):
+    checkin: str
+    checkout: str
+    adults: int = 2
+    rooms: int = 1
+
+
+@app.post("/availability")
+async def post_availability(body: AvailabilityRequest):
+    try:
+        results = await scrape_martinhal(body.checkin, body.checkout, body.adults, body.rooms)
+        nights = calculate_nights(body.checkin, body.checkout)
+        return {
+            "checkin": body.checkin,
+            "checkout": body.checkout,
+            "nights": nights,
+            "adults": body.adults,
+            "rooms": body.rooms,
             "properties": results,
         }
     except Exception as e:
